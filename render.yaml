@@ -1,0 +1,107 @@
+services:
+  # FastAPI
+  - type: web
+    name: taskforge-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taskforge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+
+  # Email worker
+  - type: worker
+    name: taskforge-worker-email
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: >
+      celery -A app.core.celery_app.celery_app worker
+      --queues=email --concurrency=2 --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taskforge-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+
+  # Image worker
+  - type: worker
+    name: taskforge-worker-images
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: >
+      celery -A app.core.celery_app.celery_app worker
+      --queues=images --concurrency=1 --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taskforge-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+
+  # Report worker
+  - type: worker
+    name: taskforge-worker-reports
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: >
+      celery -A app.core.celery_app.celery_app worker
+      --queues=reports --concurrency=1 --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taskforge-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: taskforge-redis
+          property: connectionString
+
+databases:
+  - name: taskforge-db
+    databaseName: taskforge
+    user: taskforge
+
+  - name: taskforge-redis
+    type: redis
