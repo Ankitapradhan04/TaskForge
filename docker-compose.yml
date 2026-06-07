@@ -1,0 +1,141 @@
+version: "3.9"
+
+services:
+  # ── Infrastructure ───────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: taskforge
+      POSTGRES_USER: taskforge
+      POSTGRES_PASSWORD: taskforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Application ──────────────────────────────────────────────────────────
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://taskforge:taskforge@postgres:5432/taskforge
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+  # ── Workers (one per queue for isolation) ────────────────────────────────
+  worker-email:
+    build: .
+    command: >
+      celery -A app.core.celery_app.celery_app worker
+      --queues=email
+      --concurrency=4
+      --hostname=email@%h
+      --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://taskforge:taskforge@postgres:5432/taskforge
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+
+  worker-images:
+    build: .
+    command: >
+      celery -A app.core.celery_app.celery_app worker
+      --queues=images
+      --concurrency=2
+      --hostname=images@%h
+      --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://taskforge:taskforge@postgres:5432/taskforge
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+
+  worker-reports:
+    build: .
+    command: >
+      celery -A app.core.celery_app.celery_app worker
+      --queues=reports
+      --concurrency=2
+      --hostname=reports@%h
+      --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://taskforge:taskforge@postgres:5432/taskforge
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+
+  # ── Celery Beat (scheduler for periodic tasks) ───────────────────────────
+  beat:
+    build: .
+    command: celery -A app.core.celery_app.celery_app beat --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://taskforge:taskforge@postgres:5432/taskforge
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+
+  # ── Flower (Celery monitoring UI) ────────────────────────────────────────
+  flower:
+    build: .
+    command: >
+      celery -A app.core.celery_app.celery_app flower
+      --port=5555
+      --broker=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+
+volumes:
+  postgres_data:
+  redis_data:
